@@ -33,11 +33,6 @@ This project involves geospatial analysis of wildfires in British Columbia, Cana
    source venv/bin/activate   # On Windows, use `venv\Scripts\activate`
    ```
 
-4. Install required dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
-
 ## University Project:
 This project was developed as part of a university-level course. It serves as a demonstration of geospatial analysis techniques applied to environmental data, specifically related to wildfire occurrences in British Columbia.
 
