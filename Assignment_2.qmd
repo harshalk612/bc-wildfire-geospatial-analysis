@@ -1,0 +1,789 @@
+---
+title: "Assignment 2: Wildfire Distribution Analysis"
+format: 
+  html:
+    page-layout: full
+    toc: true
+    toc-expand: true
+    toc-depth: 3
+    toc-location: left
+    other-links: 
+      - text: Historical Data
+        href: "https://www2.gov.bc.ca/gov/content/safety/wildfire-status/ab               out-bcws/wildfire-statistics"
+      - text: GeoData Library Documentation
+        href: "https://cran.r-project.org/web/packages/geodata/geodata.pdf"
+      - text: Leaflet Library Documentation
+        href: "https://rstudio.github.io/leaflet/"  
+    smooth-scroll: true
+    code-fold: true
+    code-summary: "Show the Code"
+    code-overflow: wrap
+    code-tools: true
+execute: 
+  embed-resources: true
+  warning: false
+  error: false
+---
+
+-   **Course:** DATA\*6200 (Data Manipulation and Visualization)
+-   **Instructor:** Dr. Justin Slater
+-   **Submitted by:** Harshal Kakaiya (1353288)
+
+## Introduction
+
+-   Wildfires are an increasing concern in **British Columbia**, with substantial fires recorded from 2012 to 2017 and new data emerging for 2024.
+-   This analysis examines the distribution of these wildfires over time, exploring how climate factors like temperature and elevation may impact their occurrence.
+-   Using climate data, spatial visualizations, and trend comparisons, we aim to highlight patterns and identify **environmental conditions** that may elevate fire risks in B.C.
+
+**This assignment will be organized into the following structured sections:**
+
+1.  ***Web Scraping and Data Preparation***:
+    -   Collect and scrape wildfire data from the website.
+
+\vspace{0.5pt}
+
+2.  ***Temperature and Elevation Data Collection***
+    -   Retrieve and process climate and elevation data for British Columbia.
+
+\vspace{0.5pt}
+
+3.  ***Trends in Wildfire Distribution***
+    -   Create visual representations of wildfire distribution over time.
+
+\vspace{0.5pt}
+
+4.  ***Impact of Temperature and Elevation on Fire Occurrence***
+    -   Analyze how climate factors influence wildfire likelihood.
+
+\vspace{0.5pt}
+
+5.  ***Comparison of Historical Data with Current Data***
+    -   Evaluate changes in wildfire patterns by comparing past data with recent occurrences.
+
+## Import the Libraries
+
+-   In this project, we will be importing and utilizing several libraries to facilitate data collection, processing, and visualization.
+-   These libraries will help us efficiently **scrape** wildfire data, **retrieve** climate and elevation information, and create **insightful visualizations** to analyze wildfire patterns in British Columbia.
+
+\vspace{5pt}
+
+```{r, message=FALSE}
+#| code-fold: show
+#| code-summary: "Hide the Code"
+# Import the necessary Libraries
+library(rvest)
+library(geodata)
+library(ggplot2)
+library(terra)
+library(ggspatial)
+library(tidyterra)
+library(sf)
+library(leaflet)
+library(dplyr)
+```
+
+### Description of Libraries
+
+-   **rvest:** Designed for web scraping, allowing users to easily extract and manipulate data from HTML web pages.
+-   **geodata:** Simplifies downloading and accessing various geospatial datasets, such as climate data, for analysis and visualization.
+-   **ggplot2:** Provides a powerful and flexible system for creating static and interactive visualizations based on the Grammar of Graphics.
+-   **terra:** Designed for handling and analyzing spatial data, particularly `raster` data.
+-   **ggspatial:** Extends the popular `ggplot2` for creating spatial visualizations.
+-   **tidyterra:** Integrates `terra` with the `tidyverse`, enabling intuitive visualization and manipulation of raster and vector spatial data.
+-   **sf:** R package that provides a simple and efficient way to work with spatial data using the *simple features* (SF) standard.
+-   **leaflet:** Creates interactive maps, allowing to add markers, popups, and other map features for visualizing geographic data.
+-   **dplyr:** Helps us to clean, organize, and analyze data by providing easy-to-use functions for common tasks.
+
+## Section 1. Web Scraping and Data Preparation
+
+-   In this section, we will focus on web scraping to collect historical wildfire data from 2012 to 2017.
+-   Following data retrieval, we will clean and prepare the dataset for analysis, ensuring it is structured and ready for further processing.
+
+```{r}
+# Actual URL of the website
+url <- "https://www2.gov.bc.ca/gov/content/safety/wildfire-status/about-bcws/wildfire-statistics"
+
+# Table of the website that we need
+wildfire_data <- url |> 
+  read_html() |> 
+  html_node("table") |> 
+  html_table()
+
+# head of the data we scraped
+head(wildfire_data)
+```
+
+### Statistics of the Scraped Data
+
+```{r}
+# Statistics of the Data
+summary(wildfire_data)
+```
+
+## Section 2. Temperature and Elevation data Collection
+
+-   In this section, I will be using the `geodata` package for collecting the **Elevation** and **Temperature** data of the British Columbia.
+-   This data will be processed, cropped, and masked to align with the region, preparing it for overlay with wildfire records.
+
+### Retrieving the Country Code for Canada
+
+-   Here, I will identify the country code for Canada, by using the `geodata` package to access country-specific data for our analysis.
+
+```{r}
+#| code-fold: show
+#| code-summary: "Hide the Code"
+# Query for Code
+country_codes(query = "Canada")
+```
+
+**From this, we know that we have to use *"CAN"* if we want to use any kind of geographic data.**
+
+### Canada's Elevation and Temperature Data
+
+-   Here, we will be collecting the Temperature and Elevation Data for the Canada Country.
+
+```{r}
+#| code-fold: show
+#| code-summary: "Hide the Code"
+# Temperature and Elevation Data by Country
+temp_can <- worldclim_country(country = "CAN", var = "tavg", path = "data/CAN/")
+elev_can <- elevation_30s(country = "CAN", path = "data/CAN/")
+```
+
+### Isolating British Columbia in the Canada `Spatraster`
+
+-   Initially, I will create a boundary vector to define the geographical area of British Columbia, which will be stored as `boundary_bc`.
+
+#### Defining the Boundary of British Columbia
+
+```{r}
+#| code-fold: show
+#| code-summary: "Hide the Code"
+# To Load Canada boundary data and filter for British Columbia
+boundary_can <- gadm(country = "CAN", level = 1, path = tempdir())
+boundary_bc <- boundary_can[boundary_can$NAME_1 == "British Columbia", ]
+```
+
+##### Visualizing the Boundary of BC
+
+```{r}
+# Plotting the SF Data
+ggplot() +
+  geom_sf(data = boundary_bc, alpha = 1) +
+  annotation_north_arrow(location = "bl", which_north = "true", 
+                         pad_x = unit(0.75, "in"), pad_y = unit(0.5, "in"),
+                         style = north_arrow_nautical()) +
+  coord_sf(expand = FALSE) +
+  labs(title = "Boundary of BC",
+       subtitle = "Coordinates are in Decimal Degrees",
+       x = "Longitude (Degrees)",
+       y = "Latitude (Degrees)",
+       caption = "Harshal Kakaiya") +
+  theme(panel.border = element_rect(color = "black", size = 0.1, fill = NA))
+```
+
+##### Checking the CRS of Boundary
+
+```{r}
+#| code-fold: show
+#| code-summary: "Hide the Code"
+# Checking the CRS
+st_crs(boundary_bc)
+```
+
+#### Extracting the Temp and Elev Raster of BC
+
+-   Here, I will utilize the `crop` and `mask` method to extract the British Columbia area from the full Canadian temperature and elevation.
+
+```{r, message = FALSE,results = 'hide'}
+#| code-fold: show
+#| code-summary: "Hide the Code"
+# Temperature Raster
+temp_bc <- crop(temp_can, boundary_bc)
+temp_bc <- mask(temp_bc, boundary_bc)
+
+# Elevation Raster
+elev_bc <- crop(elev_can, boundary_bc)
+elev_bc <- mask(elev_bc, boundary_bc)
+```
+
+##### Some data transformations related to Month:
+
+```{r}
+# Converting the names of SpatRaster
+names(temp_bc) <- month.abb
+
+# Converting to Dataframe
+temp_df <- as.data.frame(temp_bc)
+
+# Converting to a longer format 
+temp_df_long <- pivot_longer(temp_df, cols = Jan:Dec, 
+                             names_to = "Month", values_to = "Temperature")
+```
+
+##### Visualizing the Final Temperature Raster of BC by Month
+
+-   I've used the leaflet package to create interactive maps, which is ideal for this [use case]{.underline}.
+-   The documentation for `leaflet` is available on their ***official website***.
+    -   **Reference:** [Leaflet Documentation: Click Here](https://rstudio.github.io/leaflet/): **I have also used the `OpenStreetMap` for the Basemap of the World!**
+
+```{r, message=FALSE, warning=FALSE}
+# Temporary Loading for this code chunk
+library(leaflet.extras)
+
+# Initializing the leaflet map
+temp_month_map <- leaflet(options = leafletOptions(minZoom = 5, maxZoom = 7)) |> 
+  addProviderTiles("OpenStreetMap.Mapnik") # OpenStreetMap Basemap
+
+# Define color palette for temperature
+temp_palette <- colorNumeric("viridis", values(temp_bc), na.color = "transparent")
+
+# Looping over each layer (each month) in `temp_bc` and add it as a layer in leaflet
+for (i in 1:nlyr(temp_bc)) {
+  month_name <- month.abb[i]
+  raster_layer <- temp_bc[[i]]
+  
+  # Re-project the raster layer to WGS84 (Just in Case..)
+  raster_layer_proj <- project(raster_layer, "EPSG:4326")
+  
+  # Add the re-projected raster layer to the map with a unique group name for each month
+  temp_month_map <- temp_month_map |> 
+    addRasterImage(raster_layer_proj, colors = temp_palette, opacity = 0.9, group = month_name)
+}
+
+# Single legend for all the months in common
+temp_month_map <- temp_month_map |> 
+  addLegend(pal = temp_palette, values = range(-20:20),
+            title = "Temperature (°C)", position = "bottomleft",
+            layerId = "temp_legend")
+
+# Layer control to toggle between months and dynamically update legend
+temp_month_map <- temp_month_map |> 
+  addLayersControl(baseGroups = month.abb,
+    options = layersControlOptions(collapsed = FALSE)) 
+
+# Display the map
+temp_month_map
+```
+
+<br>**Some Useful Insights:**
+
+-   This figure clearly shows the **typical climate cycle**, with *higher temperatures* during the *warmer months* (like May and June) and l*ower, more extreme temperatures* in the c*older months* (such as December and January). You can easily observe how the temperature follows this [**seasonal pattern**]{.underline}.
+-   This figure also clearly illustrates that the *coastal areas* of British Columbia, particularly along the western coast and islands, experience [warmer temperatures]{.underline} (indicated by **greens and yellows**) throughout all months, compared to other regions.
+-   Moving inland, we can see a clear declined temperatures (**blues & purples**), particularly in the northeastern and southeastern parts [**(*some of the months*)**]{.underline}.
+
+**Some Limitations:**
+
+-   This raster data likely represents the **average temperature** over a certain period. It is not that significant because of the aggregation and ignore the *micro-fluctuations*.
+-   This appears to be a single snapshot of temperature. Temperatures in BC can vary greatly throughout the year due to different seasons. To understand the full picture, we would need temperature data for [different periods of the year]{.underline}.
+-   The average monthly temperature data obtained from geodata is limited to the years `1970-2000,` as specified in the WorldClim documentation. This represents a significant *limitation* due to the [**outdated version of the dataset.**]{.underline}
+
+##### Visualizing the Final Elevation Raster of BC
+
+```{r, message = FALSE, cache = TRUE}
+# Using the `tidyterra` plot
+ggplot() +
+  geom_spatraster(data = elev_bc) +
+  scale_fill_viridis_c(na.value = "transparent") +
+  geom_sf(data = boundary_bc, alpha = 0.1) +
+  annotation_north_arrow(location = "bl", which_north = "true", 
+                         pad_x = unit(0.75, "in"), pad_y = unit(0.5, "in"),
+                         style = north_arrow_nautical()) +
+  labs(title = "Elevation Raster of BC",
+       subtitle = "Coordinates in Decimal Degrees, Elevation in Meters Above Sea Level",
+       x = "Longitude (Degrees)",
+       y = "Latitude (Degrees)",
+       fill = "Elevation (m)",
+       caption = "Harshal Kakaiya") +
+  coord_sf(expand = FALSE) +
+  guides(fill = guide_colorbar(barwidth = 1, barheight = 10)) +
+  theme(panel.border = element_rect(color = "black", size = 0.1, fill = NA))
+```
+
+**Some Useful Insights:**
+
+-   From this figure, we can say the tallest mountains are in the ***east*** and the ***west***. These areas are shown in <u>yellow</u> on the map.
+-   Between the mountains, there's a big area of high, flat land called a `plateau`. It's not as high as the mountains, but it's still pretty high up. This is shown in <u>green</u> on the map.
+
+**Some Limitations:**
+
+-   This map clearly shows the <u>general</u> shape of the land, but it might miss some small **hills and valleys**.
+-   The **heights** shown on the map might not be perfectly *accurate* in topographical context.
+-   The [elevation raster]{.underline} contains only one column, with no ***context or metadata*** provided about its meaning. This **lack of information** limits the ability to interpret or use the data effectively.
+
+## Section 3. Trends in Wildfire Distribution over Timeline
+
+-   In this section, I analyze *wildfire* trends in **British Columbia** from `2012` to `2017`, using the previously scraped historical data.
+
+### Vectorizing Scraped Latitude and Longitude Data
+
+-   Here, I will convert the scraped data to vector format that allows us for spatial analysis. T
+-   This process involves transforming raw data points into structured vector layers, using the `sf` package.
+
+#### Conversion of Degree-Minutes into Decimal Degree
+
+-   While examining the `Longitude` and `Latitude` data, I found they are in the **Degree-Minute System (DMS)** format, which is not suitable for spatial analysis, so they need the conversion to another system.
+-   In this section, I will be converting them into the <u>Decimal Degree System</u> **(DDS)** using the formula of their conversion:
+
+<p><strong>Decimal Degrees = Degrees + (Minutes / 60)</strong></p>
+
+```{r}
+# Function to convert from DMS to DDS
+convert_dms_dds <- function(dms){
+  # Split the value to find degrees and minutes
+  parts <- unlist(strsplit(dms, " ")) # to return character vector
+  degrees <- as.numeric(parts[1])
+  minutes <- as.numeric(parts[2])
+  
+  # Formula for conversion
+  dec_degrees <- degrees + (minutes / 60)
+  return(dec_degrees)
+}
+
+# Applying to the table
+wildfire_data$Longitude <- sapply(wildfire_data$Longitude, convert_dms_dds)
+wildfire_data$Latitude <- sapply(wildfire_data$Latitude, convert_dms_dds)
+```
+
+#### Longitude Conversion: Shifting from East to West
+
+-   In this, I will convert wildfire coordinates from East to West longitude by negating the values: each Eastern longitude (0° to 180°) is transformed to its Western counterpart by making it negative.
+-   For example, 120° E becomes -120° W. This mirrors the coordinates for accurate Western Hemisphere display.
+
+```{r}
+# From East to West
+wildfire_data$Longitude <- - (wildfire_data$Longitude)
+```
+
+-   Let's see the Dataframe that we converted using the `head`:
+
+```{r}
+# First 5 Rows
+head(wildfire_data)
+```
+
+#### Extraction of Vector Data from Scraped Data
+
+-   I will utilize the `st_as_sf()` function to convert the scraped data frame into a `Simple Features (sf)` object, which will facilitate **geospatial visualization** in our analysis.
+
+```{r}
+# Transformation of Scraped Data
+wildfires_hist <- st_as_sf(x = wildfire_data,
+                           coords = c("Longitude", "Latitude"),
+                           crs = 4326)
+```
+
+### Historical Wildfires Visualization over Temperature
+
+-   I've used the leaflet package to create interactive maps, which is ideal for this [use case too]{.underline}.
+-   The documentation for `leaflet` is available on their ***official website***.
+    -   **Reference:** [Leaflet Documentation: Click Here](https://rstudio.github.io/leaflet/): **I have also used the `OpenStreetMap` for the Basemap of the World!**
+
+```{r}
+# Initialize the leaflet map
+hist_fire_map <- leaflet(options = leafletOptions(minZoom = 5, maxZoom = 7)) |> 
+  addProviderTiles("OpenStreetMap.Mapnik") 
+
+# Year Palette
+year_palette <- colorFactor(palette = "magma", domain = unique(wildfires_hist$Year))
+
+# Ensure 'Month' column is there (extract from Discovery Date if needed)
+wildfires_hist$Month <- format(as.Date(wildfires_hist$`Discovery Date`, format = "%B %d, %Y"), "%b")
+
+# Adding monthly temperature layers from temp_bc
+for (i in 1:nlyr(temp_bc)) {
+  month_name <- month.abb[i] 
+  raster_layer <- temp_bc[[i]]
+  
+  hist_fire_map <- hist_fire_map |> 
+    addRasterImage(raster_layer, colors = temp_palette, opacity = 0.9, group = paste("Temp", month_name))
+}
+
+# Add a single legend for temperature
+hist_fire_map <- hist_fire_map |> 
+  addLegend(pal = temp_palette, values = values(temp_bc),
+            title = "Temperature (°C)", position = "bottomleft",
+            layerId = "temp_legend")
+
+# Create groups for each year and month combination
+for (year in unique(wildfires_hist$Year)) {
+  for (month in unique(wildfires_hist$Month)) {
+    wildfires_subset <- wildfires_hist |> 
+      filter(Year == year, Month == month)
+    
+    if (nrow(wildfires_subset) > 0) {
+      group_name <- paste(month, year, "Wildfires") 
+      
+      hist_fire_map <- hist_fire_map |> 
+        addCircleMarkers(
+          data = wildfires_subset,
+          lng = ~st_coordinates(geometry)[,1], 
+          lat = ~st_coordinates(geometry)[,2],
+          radius = ~log(`Size (ha)`) / 2, 
+          fillColor = ~year_palette(Year), 
+          stroke = TRUE, 
+          weight = 0.5,
+          opacity = 1,
+          color = "black",
+          fillOpacity = 0.8,
+          popup = ~paste(
+            "<b>Fire Number:</b>", `Fire Number`, "<br>",
+            "<b>Geographic:</b>", Geographic, "<br>",
+            "<b>Discovery Date:</b>", `Discovery Date`, "<br>",
+            "<b>Size (ha):</b>", `Size (ha)`
+          ),
+          group = group_name 
+        )
+    }
+  }
+}
+
+# Add a legend for wildfire years
+hist_fire_map <- hist_fire_map |> 
+  addLegend(
+    pal = year_palette, 
+    values = unique(wildfires_hist$Year), 
+    title = "Wildfire Year",
+    position = "topleft"
+  )
+
+# Get the wildfire group names in month order
+wildfire_groups <- unique(paste(wildfires_hist$Month, wildfires_hist$Year, "Wildfires"))
+wildfire_groups_ordered <- wildfire_groups[order(match(substr(wildfire_groups, 1, 3), month.abb))] 
+
+# Layer control with separate month and year selection (months in order)
+hist_fire_map <- hist_fire_map |>  
+  addLayersControl(
+    baseGroups = paste("Temp", month.abb),
+    overlayGroups = wildfire_groups_ordered,  
+    options = layersControlOptions(collapsed = FALSE),
+    position = "topright" 
+  )
+
+# Get all wildfire group names
+all_wildfire_groups <- unique(paste(wildfires_hist$Month, wildfires_hist$Year, "Wildfires"))
+
+# Initially hide all wildfire groups
+hist_fire_map <- hist_fire_map |> 
+  hideGroup(all_wildfire_groups)
+
+# Show the first wildfire group
+first_wildfire_group <- wildfire_groups_ordered[1] 
+hist_fire_map <- hist_fire_map |> 
+  showGroup(first_wildfire_group)
+
+# Adding label-only markers for additional explanation
+hist_fire_map <- hist_fire_map |> 
+  addLabelOnlyMarkers(
+    lng = -130.000, lat = 52.000,
+    label = htmltools::HTML(paste0(
+      "Circle radius indicates wildfire size (hectares)<br>", 
+      "Larger for bigger areas, smaller for smaller ones<br>",
+      "Click the circles for more details<br>",
+      "Different Years has Different Colors!"
+    )),
+    labelOptions = labelOptions(noHide = TRUE, textsize = "14px", direction = "left")
+  )
+
+# Display the map
+hist_fire_map
+```
+
+<br> **Some Useful Insights:**
+
+-   Examining the plot of all years together, it can be said that `2015 & 2017` were notably active years for **wildfires** in British Columbia, as indicated by the higher frequency of [yellow dots and red]{.underline} dotscompared to other colors.
+-   The [**map layer box**]{.underline} clearly shows no wildfires in *colder months*, except for a single wildfire in `November`. This pattern strongly suggests that **temperature** is a key factor in **wildfire** occurrence.
+-   Interesting thing is that if we look at the top **left corner** of the `map`, it's like a <u>silent zone</u> for wildfires over all the years `(2012-2017)`. There are very less dots in that area as compared to the rest of the parts of British Columbia. This could be because of different types of *elevations, vegetation* that are less likely to burn, and also the possibility of *rainfall* in that part.
+-   Within the `plot`, two **islands** are clearly visible, surrounded by water. The smaller island shows virtually *no wildfires*, while the larger island experiences a *significant number* of wildfires across all years. This disparity suggests that the factors influencing wildfires on the **islands** may differ from those affecting the **mainland**.
+-   Upon closer inspection of the `coast`, we observe areas marked by warmer ***yellow and green*** hues, indicating higher temperatures. This may seem *surprising* since coasts are typically think of as `cooler`. However, it is an important <u>detail</u>, especially considering the lower number of wildfires in these regions compared to the other parts of British Columbia.
+-   Wildfires in ***October*** are notably fewer compared to other months, likely due to [cooler]{.underline} temperatures relative to the [hotter]{.underline} months.
+
+**Some Limitations:**
+
+-   While this map shows that [**wildfires and higher temperatures**]{.underline} often occur together, it doesn't necessarily mean that hot weather directly causes all the fires. There could be other factors involved, like *lightning strikes, human activities, or the types of trees and plants* in an area.
+-   We're only looking at a specific time period `(2012-2017)`. Wildfire patterns might be different in other years or over longer periods.
+-   The map gives us a good overview, but it might not show every **single wildfire or the exact temperature** at every location. The data we used has a certain level of detail, and some *smaller fires or temperature variations* might not be captured.
+-   The average monthly temperature data from geodata is limited to `1970-2000`, as noted in the **WorldClim documentation**. This [misalignment]{.underline} in years means that *fire occurrences* don't correspond directly with the *temperature data*!
+
+## Section 4. Impact of Temperature and Elevation on Wildfires
+
+-   In this section, I will analyze the impact of Temperature and Elevation on wildfire occurrences. - The analysis is organized into two subsections, with each focusing on one attribute: Temperature and Elevation.
+-   Each subsection provides insights into how these environmental factors contribute to wildfire risks in the region.
+
+### Temperature Impact on Wildfire Occurences
+
+-   This subsection explores how temperature variations, both locally and regionally, influence wildfire frequency across British Columbia.
+
+#### Extracting the Temperature of the Wildfire Areas
+
+-   First, we extract temperature values at wildfire locations to compare with wildfire frequency.
+
+```{r}
+# Extracting the temperature of wildfires by Month of Wildfire
+# NOTE: `month` column already created before 
+fires_temp <- terra::extract(temp_bc, wildfires_hist, layer = wildfires_hist$Month)$value
+
+# Creating a New Column in the Wildfires data
+wildfires_hist <- wildfires_hist |> 
+  mutate(temperature = fires_temp)
+```
+
+##### Classifying the Temperatures of Wildfires
+
+-   We can classify the temperatures of the wildfires into specific temperature classes (e.g., 0-5°, 5-10°, etc.)
+
+```{r}
+# Define the Bins 
+temp_bins <- c(-30,-25,-20,-15,-10,-5,0,5,10,15,20,25,30)
+temp_labels <- c("[-30,-25)", "[-25,-20)", "[-20,-15)",
+                 "[-15,-10)", "[-10,-5)", "[-5,-0)",
+                 "[0,5)", "[5,10)", "[10,15)",
+                 "[15,20)", "[20,25)", "[25,30)")
+
+# Classify the Temperatures into the Temperature Bins
+wildfires_hist$temp_class <- cut(wildfires_hist$temperature, 
+                                 breaks = temp_bins, 
+                                 labels = temp_labels,
+                                 include.lowest = TRUE,
+                                 right = FALSE)
+```
+
+##### Defining the Temperature Rasters into Classes
+
+```{r, results='hide'}
+#| code-fold: show
+#| code-summary: "Hide the Code"
+# Reclassify temperature into classes
+temp_class_raster <- classify(temp_bc, rcl = cbind(temp_bins[-length(temp_bins)], temp_bins[-1], 1:length(temp_bins)))
+```
+
+#### Calculating area for the Temperature Raster Layers
+
+```{r}
+# Area of a Single Raster Cell
+cell_size = res(temp_bc)
+cell_area = prod(cell_size)
+
+# Statistics of different temperature classes
+temp_stats <- freq(temp_class_raster)
+
+# Area and some mappings
+temp_stats$area <- (temp_stats$count) * cell_area
+temp_stats$layer <- plyr::mapvalues(temp_stats$layer, from = 1:12, to = month.abb)
+temp_stats$value <- plyr::mapvalues(temp_stats$value, from = 1:length(temp_labels), to = temp_labels)
+
+# Seeing first Rows
+head(temp_stats)
+```
+
+#### Creating the Final Dataframe consisting of Fire Rates
+
+```{r}
+# Initialize the dataframe
+final_df <- data.frame()
+
+# For Loop for Combining different dataframes
+for (month in month.abb){
+  wildfires_month <- wildfires_hist[wildfires_hist$Month == month, ]
+  temp_stats_month <- temp_stats[temp_stats$layer == month, ]
+  if(nrow(wildfires_month) > 0){
+    combine_df <- merge(wildfires_month, temp_stats_month, 
+                            by.x = "temp_class", by.y = "value")
+    combine_df <- combine_df |> 
+      group_by(temp_class) |> 
+      mutate(count_temp = n())
+    combine_df$fire_rate <- combine_df$count_temp / combine_df$area
+    final_df <- rbind(final_df, combine_df)
+    }
+}
+
+# Seeing first 5 Rows of Final Dataframe
+head(final_df)
+```
+
+#### Final Visualization between Temperature and Fire Rates
+
+-   Finally, we will be plotting all the fire rates of the historical wildfires against the temperature class.
+
+```{r, fig.width=10, fig.height=6}
+ggplot(data = final_df, aes(x = temperature, y = fire_rate, colour = Month)) +  geom_point() +
+  geom_line(stat = "smooth", method = "loess", se = TRUE, color = "blue", 
+            linetype = "dashed", alpha = 0.8) + 
+  labs(x = "Temperature (C°)", 
+       y = "Wild Fire Rate",
+       title = "Impact of Temperature on Fire rate",
+       subtitle = "Here, Wildfire Rate is Number of Wildfires per Unit Area of Temperature Interval",
+       caption = "Harshal Kakaiya") 
+```
+
+**Some observations of the Plot:**
+
+-   The trend appears to be ***nonlinear***, with wildfire rates remaining [low and fairly consistent]{.underline} at lower temperatures. However, as temperatures exceed around `15°C`, there is a noticeable increase in wildfire rates.
+-   In the temperature range of `5°C to 15°C`, an unusual pattern emerges: wildfire rates appear *higher* in the `5°C–10°C` interval than in the `10°C–15°C` range. This is surprising because higher temperatures generally create **more favorable** conditions for fires, such as *drier vegetation and lower humidity*, which typically increase fire likelihood.
+-   Here, *different colors represent months*, highlighting that wildfires occur across various months but tend to occur at specific temperature ranges based on **season**. For example, warmer months like **July and August** show higher wildfire rates at temperatures over `15°C`, reflecting the impact of summer on fire susceptibility.
+-   The steep increase in wildfire rates past threshold temperature (around `15°C`) might indicate us that ***fire-prone conditions*** become more prevalent beyond this point.
+
+**Limitations of this analysis:**
+
+-   **Temperature** alone is unlikely to be the only factor influencing wildfire rates. Variables like *elevation, humidity, wind speed, vegetation type, and human activities* also play significant roles in fire occurrence, Without having accountability for these, out analysis might overstate temperature’s influence on fire rates.
+-   The fact that there are more data points in **summer months** might reflect the seasonal bias, which also directly indicates that the higher temperatures has [**direct relationship**]{.underline} with the wildfire occurrences.
+
+### Elevation Impact on Wildfire Occurences
+
+-   This subsection examines the relationship between elevation and wildfire occurrences, investigating whether certain altitudes are more prone to wildfires.
+
+#### Extracting the Elevation at Wildfire Locations
+
+-   First, we’ll extract elevation values at each wildfire location to examine elevation’s effect on wildfire occurrences.
+-   This allows us to compare wildfire frequency across different elevation ranges.
+
+```{r}
+# Renaming the Column of Elevation Raster
+names(elev_bc) <- "elevation"
+
+# Extract Elevation
+wildfires_hist$elevation <- terra::extract(elev_bc, wildfires_hist)$elevation
+
+# Viewing the First 5 Rows 
+head(wildfires_hist[,c("Year", "Fire Number", "elevation")])
+```
+
+#### Classifying the Elevation Classes on the Wildfires
+
+-   Here, we will define some elevation ranges and will classify the wildfire points based on them for visualization.
+
+```{r}
+# Define elevation bins and classify
+elev_bins <- c(0,300,600,900,1200,1500,1800,2100,2400)
+
+# Define the Labels
+elev_labels <- c("[0-300)", "[300-600)", "[600-900)",
+                 "[900-1200)", "[1200-1500)", "[1500-1800)",
+                 "[1800-2100)", "[2100-2400)")
+
+# Classification
+wildfires_hist$elev_class <- cut(wildfires_hist$elevation, breaks = elev_bins,
+                                 labels = elev_labels, include.lowest = TRUE)
+```
+
+#### Final Visualization Between Elevation Range and Fire Occurences
+
+```{r, fig.height=6, warning=FALSE, message=FALSE}
+# Making a Count Dataframe
+elev_counts <- wildfires_hist |> 
+  group_by(elev_class) |> 
+  summarise(elev_counts = n())
+
+# Dropping NA Class
+elev_counts <- drop_na(elev_counts)
+
+# Final Visualization between them
+ggplot(elev_counts, aes(x = elev_class, y = elev_counts, fill = elev_class)) +
+  geom_bar(stat = "identity", width = 0.4, alpha = 0.8) +
+  geom_line(stat = "smooth", method = "loess", se = FALSE, color = "black", 
+            aes(group = 1), linetype = "dashed", alpha = 0.8, size = 0.8) +
+  geom_text(aes(label = elev_counts), vjust = -0.5, color = "blue") +
+  labs(x = "Elevation (m)", 
+       y = "Wildfire Occurrences (Count)", 
+       title = "Wildfire Occurrences by Elevation Range",
+       subtitle = "Plot shows the Elevation Class (metre above sea level) and Number of Fires Occured",
+       caption = "Harshal Kakaiya") +
+  theme(axis.text.x = element_text(),
+        legend.position = "none")
+```
+
+**Some useful Results from the Graph:**
+
+-   Here, we can see **kind of a relationship** between the Elevation and Wildfires. The **highest** number of wildfires occurs in the `600-900` meter elevation range, followed by the `300-600` meter range.
+-   As elevation increases beyond `900` meters, the number of wildfires tends to decrease. This may be attributed to factors such as *changes in vegetation types, lower temperatures, and differences in human activities* at higher elevations.
+-   The ***lowest*** number of wildfires was observed in the elevation range of `2100-2400` meters, followed by the `0-300` meters and `1800-2100` meters intervals as the second and third lowest. This pattern could be attributed to the high altitude in these metre ranges, which may limit fire occurrence.
+
+**Limitations of the plot:**
+
+-   The plot only shows the number of wildfires by [elevation range]{.underline}, but it doesn't provide information about the timing of these fires. This limits our understanding of **seasonal patterns or trends over time**.
+-   The Elevation raster consists of a single column representing the elevation mask for British Columbia, with no additional information provided. This limitation restricts the **analysis of elevation data** in this context.
+-   The accuracy of the data used to create the plot is crucial. Any errors or biases in the data could affect the [conclusions]{.underline} drawn from the plot.
+
+## Section 5. Comparison of Historical Data with Current Data
+
+-   This section compares wildfire data from `2012-2017` with data from `2024` to identify shifts in **wildfire patterns** across [British Columbia]{.underline}.
+
+### Accessing Wildfires Current Data from the Internet
+
+-   First, we’ll download the current wildfire data from British Columbia’s online data catalog. After downloading, we’ll read the ***shape file*** format to use it for further analysis.
+
+```{r, message=FALSE, warning=FALSE, results='hide'}
+#| code-fold: show
+#| code-summary: "Hide the Code"
+# Wildfire Points
+wildfires_curr_pts <- st_read("data/current/C_FIRE_PNT_point.shp")
+```
+
+#### Converting Both Shape Files in the Same CRS
+
+```{r}
+#| code-fold: show
+#| code-summary: "Hide the Code"
+# Convert Current to the CRS of Current Wildfire Points
+wildfires_curr_pts <- st_transform(wildfires_curr_pts, st_crs(wildfires_hist))
+```
+
+### Comparison of Historical Wildfires with Current Wildfires
+
+```{r, fig.width=16, fig.height=10, warning=FALSE, message=FALSE}
+# Create a combined data frame with a "type" column
+combined_sf <- bind_rows(
+  wildfires_hist |> 
+    mutate(type = "Historical"), # Historical
+  wildfires_curr_pts |> 
+    mutate(type = "Current") # Current
+)
+
+# Create the combined plot with improved aesthetics
+ggplot() +
+  geom_spatraster(data = temp_bc) +
+  scale_fill_gradientn(colors = terrain.colors(10), na.value = "transparent") +  
+  geom_sf(data = combined_sf, aes(color = type), size = 1.5, alpha = 0.7) +
+  scale_color_manual(values = c("Historical" = "red", "Current" = "blue"), name = "Wildfire Type") +
+  labs(title = "Wildfire Distribution with Temperature",
+       subtitle = "Visualizing Temperature and Wildfire Data: A Comparison of Recent and Historical Wildfires",
+       caption = "Harshal Kakaiya",
+       x = "Longitude (Degrees)",
+       y = "Latitude (Degrees)") +
+  guides(color = guide_legend(override.aes = list(size = 4)),  
+    fill = guide_colorbar(barwidth = 15,
+                          title = "Temperature (°C)",
+                          title.vjust = 0.85)) +
+  facet_wrap(~ type) +
+  theme(
+    legend.position = "bottom", 
+    legend.box = "horizontal",   
+    legend.margin = margin(t = 20, r = 10, b = 5, l = 10, unit = "pt"),
+    legend.justification = "center",
+    panel.grid.major = element_line(color = gray(0.9)),  
+    plot.title = element_text(size = 18, hjust = 0.5),  
+    plot.subtitle = element_text(size = 14, hjust = 0.5),
+    plot.caption = element_text(size = 14),
+    axis.title = element_text(size = 14),
+    axis.text = element_text(size = 12),
+    legend.text = element_text(size = 12),
+    legend.title = element_text(size = 14),
+    strip.text = element_text(size = 14)
+  ) 
+```
+
+**Some useful observations of the plot:**
+
+-   The `current` map shows a significantly higher density of fire points compared to the `Historical` map. This suggests that recent wildfire activity has been more **intense** and **widespread** in these years.
+-   Both *recent* and *historical* wildfires exhibit a somewhat similar [spatial distribution]{.underline} across `British Columbia`. They are concentrated in the **central, north-western and southern regions** of the province.
+-   The distribution of current wildfires shows an interesting **deviation** from historical patterns, with notably fewer fires occurring along *coastal regions*. This outcome is both surprising and intriguing, highlighting a shift that could have significant implications for understanding wildfire behavior in these areas.
+-   Comparing both maps, we observe an important insight: there are very few wildfires in the ***northeastern*** corner of British Columbia. This pattern is consistent in both current and historical data, offering valuable information about wildfire distribution across the province.
+-   Focusing on the [top-right]{.underline} corner of the map, there is a noticeable difference between historical and current wildfire data. Historically, this area experienced a higher number of wildfires compared to the present, highlighting a shift in wildfire occurrence over time.
+-   In both maps, the [**smaller island**]{.underline} shows no reported wildfires, while the [**larger island**]{.underline} has wildfire activity in both current and historical data. This contrast underscores a distinct pattern in wildfire distribution.
+-   The present data shows a significantly *higher number of wildfires* in the southern part of the province compared to historical data.
+
+**Some Limitations of this analysis:**
+
+-   This plot doesn't provide specific details about the data sources **(e.g., satellite imagery, ground observations)**. Understanding the data quality and limitations is crucial for interpreting the results.
+-   While the visualization suggests a correlation between temperature and wildfires, it doesn't establish a causal relationship. Other factors, such as [*human activities, fuel load, and wind patterns*]{.underline}, also play significant roles in wildfire occurrence.
+-   The average monthly temperature data from geodata is limited to `1970-2000`, as noted in the **WorldClim documentation**. This [misalignment]{.underline} in years means that *fire occurrences* don't correspond directly with the *temperature data*!
